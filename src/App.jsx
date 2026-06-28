@@ -7,7 +7,7 @@ import Layout from './components/layout/Layout'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import OrderList from './pages/Orders/OrderList'
-import Documents from './pages/Documents'
+import DocumentList from './pages/Documents/DocumentList'
 import Counterparties from './pages/Counterparties'
 import Finance from './pages/Finance'
 import Reminders from './pages/Reminders'
@@ -31,7 +31,7 @@ export default function App() {
         }
       >
         <Route path="/orders" element={<OrderList />} />
-        <Route path="/documents" element={<Documents />} />
+        <Route path="/Documents" element={<DocumentList />} />
         <Route path="/counterparties" element={<Counterparties />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/reminders" element={<Reminders />} />
