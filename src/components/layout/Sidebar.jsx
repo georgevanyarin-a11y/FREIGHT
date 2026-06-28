@@ -6,7 +6,8 @@ import {
   FiDollarSign,
   FiBell,
   FiSettings,
-  FiTruck
+  FiTruck,
+  FiCpu
 } from 'react-icons/fi'
 
 // Пункты навигации. Чтобы добавить новый модуль — добавьте строку сюда
@@ -14,6 +15,7 @@ import {
 export const NAV_ITEMS = [
   { to: '/orders', label: 'Заявки', icon: FiClipboard },
   { to: '/documents', label: 'Документы', icon: FiFileText },
+  { to: '/contract-import', label: 'Анализ договора', icon: FiCpu },
   { to: '/counterparties', label: 'Контрагенты', icon: FiUsers },
   { to: '/finance', label: 'Финансы', icon: FiDollarSign },
   { to: '/reminders', label: 'Напоминания', icon: FiBell },

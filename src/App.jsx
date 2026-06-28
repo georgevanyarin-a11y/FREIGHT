@@ -12,6 +12,7 @@ import Counterparties from './pages/Counterparties'
 import Finance from './pages/Finance'
 import Reminders from './pages/Reminders'
 import Settings from './pages/Settings'
+import ContractImport from './pages/ContractImport/ContractImport'
 
 export default function App() {
   const { session } = useAuth()
@@ -32,6 +33,7 @@ export default function App() {
       >
         <Route path="/orders" element={<OrderList />} />
         <Route path="/Documents" element={<DocumentList />} />
+        <Route path="/contract-import" element={<ContractImport />} />
         <Route path="/counterparties" element={<Counterparties />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/reminders" element={<Reminders />} />
