@@ -1,44 +1,61 @@
-// Серверная функция Vercel: распознаёт договор через GigaChat (Сбер).
-// Путь запроса: POST /api/analyze
-// Переменные окружения в Vercel: GIGACHAT_AUTH_KEY (обязательно),
+// Серверная функция Vercel: распознаёт заявку/договор через GigaChat (Сбер).
+// Путь: POST /api/analyze
+// Переменные окружения: GIGACHAT_AUTH_KEY (обязательно),
 //   GIGACHAT_SCOPE (по умолчанию GIGACHAT_API_PERS), GIGACHAT_MODEL (по умолчанию GigaChat-2)
 
 import crypto from 'node:crypto'
 
-// GigaChat использует российский корневой сертификат, которого нет в Node по умолчанию.
-// Отключаем проверку TLS только в этой функции (она ходит лишь к серверам Сбера).
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 const OAUTH_URL = 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth'
 const API_BASE = 'https://gigachat.devices.sberbank.ru/api/v1'
 
-const PROMPT = `Ты ассистент логиста. На изображениях — страницы договора или заявки на грузоперевозку.
-Извлеки данные и верни СТРОГО один JSON-объект без пояснений и без markdown, со следующими ключами:
-"customer_number" — номер заявки/договора заказчика (строка, если нет — "")
-"loading_address" — полный адрес погрузки
-"unloading_address" — полный адрес выгрузки
-"loading_contact_name" — имя контакта на погрузке
-"loading_contact_phone" — телефон на погрузке (как в документе)
-"unloading_contact_name" — имя контакта на выгрузке
-"unloading_contact_phone" — телефон на выгрузке
-"delivery_deadline" — срок доставки в формате ГГГГ-ММ-ДД (если нет — "")
-"rate" — ставка перевозчику числом без валюты (если нет — null)
-"note" — кратко особые условия, тип груза, требования к ТС (если нет — "")
-Если поля в документе нет — поставь пустую строку "". Не выдумывай данные.`
+const PROMPT = `Ты ассистент логиста. На изображениях — заявка или договор на грузоперевозку.
+Распознай важные для перевозчика данные: номер заявки, дату подачи, ставку, ВСЕ места погрузки и выгрузки (с адресами, контактами, датами и временем), сведения о грузе, водителе и транспортном средстве.
+
+Верни СТРОГО один JSON-объект без markdown и без пояснений, такой структуры:
+{
+  "customer_number": "номер заявки/договора заказчика",
+  "order_date": "дата подачи заявки в формате ГГГГ-ММ-ДД",
+  "rate": ставка перевозчику числом без валюты и пробелов (или null),
+  "vat_included": true если ставка указана С НДС, false если без НДС или не указано,
+  "cargo": "наименование груза",
+  "weight": вес в тоннах числом (или null),
+  "volume": объём в куб.м числом (или null),
+  "driver_name": "ФИО водителя",
+  "driver_phone": "телефон водителя",
+  "vehicle_info": "марка и гос. номер транспортного средства",
+  "note": "прочие важные условия (например, способ погрузки/разгрузки)",
+  "points": [
+    {
+      "kind": "loading или unloading",
+      "address": "полный адрес как в документе",
+      "date": "ГГГГ-ММ-ДД",
+      "time": "интервал времени, например 08:00–16:00",
+      "contact_name": "имя контактного лица",
+      "contact_phone": "телефон контактного лица"
+    }
+  ]
+}
+
+ПРАВИЛА для "points" — это самое важное:
+- Перечисли КАЖДОЕ место отдельным объектом, по порядку. Если мест погрузки несколько (Место 1, Место 2, ...) — добавь по объекту на каждое.
+- kind="loading" — место, ОТКУДА забирают груз (Погрузка, Загрузка, Грузоотправитель).
+- kind="unloading" — место, КУДА везут и сдают груз (Выгрузка, Разгрузка, Грузополучатель).
+- Не путай погрузку и выгрузку местами. Контакты и время бери из того же блока, что и адрес.
+
+Адреса переписывай полностью, как в документе (город, улица, дом, организация/склад).
+Если поля нет — пустая строка "" (для чисел — null). Ничего не выдумывай: не уверен — оставь пустым.`
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Метод не поддерживается' })
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Метод не поддерживается' })
 
   const authKey = process.env.GIGACHAT_AUTH_KEY
   const scope = process.env.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS'
   const model = process.env.GIGACHAT_MODEL || 'GigaChat-2'
 
   if (!authKey) {
-    return res.status(500).json({
-      error: 'Не задан GIGACHAT_AUTH_KEY в переменных окружения Vercel.'
-    })
+    return res.status(500).json({ error: 'Не задан GIGACHAT_AUTH_KEY в переменных окружения Vercel.' })
   }
 
   const images = req.body?.images
@@ -56,32 +73,25 @@ export default async function handler(req, res) {
 
     const messages = fileIds.map((id, i) => ({
       role: 'user',
-      content: `Изображение страницы ${i + 1} договора.`,
+      content: `Изображение страницы ${i + 1} документа.`,
       attachments: [id]
     }))
     messages.push({ role: 'user', content: PROMPT })
 
     const completion = await fetch(`${API_BASE}/chat/completions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ model, messages, temperature: 0.1 })
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, temperature: 0 })
     })
 
     if (!completion.ok) {
       const text = await completion.text()
-      return res
-        .status(502)
-        .json({ error: `GigaChat: ошибка генерации ${completion.status}. ${text.slice(0, 300)}` })
+      return res.status(502).json({ error: `GigaChat: ошибка генерации ${completion.status}. ${text.slice(0, 300)}` })
     }
 
     const data = await completion.json()
     const content = data?.choices?.[0]?.message?.content || ''
-    const parsed = parseJson(content)
-
-    return res.status(200).json(parsed)
+    return res.status(200).json(parseJson(content))
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Внутренняя ошибка распознавания.' })
   }
@@ -102,8 +112,7 @@ async function getToken(authKey, scope) {
     const text = await res.text()
     throw new Error(`Авторизация GigaChat не удалась (${res.status}). ${text.slice(0, 200)}`)
   }
-  const json = await res.json()
-  return json.access_token
+  return (await res.json()).access_token
 }
 
 async function uploadImage(token, base64, index) {
@@ -111,7 +120,6 @@ async function uploadImage(token, base64, index) {
   const form = new FormData()
   form.append('purpose', 'general')
   form.append('file', new Blob([bytes], { type: 'image/jpeg' }), `page-${index}.jpg`)
-
   const res = await fetch(`${API_BASE}/files`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -121,8 +129,7 @@ async function uploadImage(token, base64, index) {
     const text = await res.text()
     throw new Error(`Загрузка изображения не удалась (${res.status}). ${text.slice(0, 200)}`)
   }
-  const json = await res.json()
-  return json.id
+  return (await res.json()).id
 }
 
 function parseJson(text) {
