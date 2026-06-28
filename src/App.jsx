@@ -8,12 +8,13 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import OrderList from './pages/Orders/OrderList'
 import DocumentList from './pages/Documents/DocumentList'
-import Finance from './pages/Finance'
+import Finance from './pages/Finance/Finance'
 import Reminders from './pages/Reminders'
 import Settings from './pages/Settings'
 import ContractImport from './pages/ContractImport/ContractImport'
 import CarrierProfile from './pages/Profile/CarrierProfile'
 import CounterpartyList from './pages/Counterparties/CounterpartyList'
+
 
 export default function App() {
   const { session } = useAuth()
