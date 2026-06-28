@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FiPlus, FiEdit2, FiTrash2, FiSearch, FiUsers, FiPhone, FiMail } from 'react-icons/fi'
+import { FiPlus, FiEdit2, FiTrash2, FiSearch, FiUsers, FiPhone, FiMail, FiEye } from 'react-icons/fi'
 import { supabase } from '../../lib/supabaseClient'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
 import Badge from '../../components/ui/Badge'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import CounterpartyForm from './CounterpartyForm'
+import CounterpartyView from './CounterpartyView'
 
 const RELIABILITY_VIEW = {
   good: { label: 'Надёжный', tone: 'done' },
@@ -24,6 +25,7 @@ export default function CounterpartyList() {
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [delBusy, setDelBusy] = useState(false)
+  const [viewing, setViewing] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -97,6 +99,7 @@ export default function CounterpartyList() {
                   {c.email && <div className="flex items-center gap-1.5 truncate text-ink-500"><FiMail size={13} />{c.email}</div>}
                 </div>
                 <div className="mt-3 flex justify-end gap-1 border-t border-ink-100 pt-2">
+                  <button onClick={() => setViewing(c)} className="rounded-lg p-2 text-ink-500 hover:bg-ink-100 hover:text-ink-700" title="Просмотр"><FiEye size={15} /></button>
                   <button onClick={() => openEdit(c)} className="rounded-lg p-2 text-ink-500 hover:bg-brand-50 hover:text-brand-700" title="Редактировать"><FiEdit2 size={15} /></button>
                   <button onClick={() => setDeleting(c)} className="rounded-lg p-2 text-ink-500 hover:bg-red-50 hover:text-red-600" title="Удалить"><FiTrash2 size={15} /></button>
                 </div>
@@ -108,6 +111,15 @@ export default function CounterpartyList() {
 
       {formOpen && (
         <CounterpartyForm open counterparty={editing} onClose={() => setFormOpen(false)} onSaved={onSaved} />
+      )}
+
+      {viewing && (
+        <CounterpartyView
+          open
+          counterparty={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={(c) => { setViewing(null); openEdit(c) }}
+        />
       )}
 
       <ConfirmDialog

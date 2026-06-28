@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  FiPlus, FiEdit2, FiTrash2, FiChevronLeft, FiChevronRight, FiSearch, FiInbox
+  FiPlus, FiEdit2, FiTrash2, FiChevronLeft, FiChevronRight, FiSearch, FiInbox, FiEye
 } from 'react-icons/fi'
 import { supabase } from '../../lib/supabaseClient'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import OrderForm from './OrderForm'
+import OrderView from './OrderView'
 import { STAGE_OPTIONS, stageView, checklistProgress } from './orderStages'
 
 const PAGE_SIZE = 10
@@ -24,6 +25,7 @@ export default function OrderList() {
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [viewing, setViewing] = useState(null)
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -165,6 +167,7 @@ export default function OrderList() {
                       </td>
                       <td className="px-4 py-3 align-top">
                         <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setViewing(o)} className="rounded-lg p-2 text-ink-500 hover:bg-ink-100 hover:text-ink-700" title="Просмотр"><FiEye size={15} /></button>
                           <button onClick={() => openEdit(o)} className="rounded-lg p-2 text-ink-500 hover:bg-brand-50 hover:text-brand-700" title="Редактировать"><FiEdit2 size={15} /></button>
                           <button onClick={() => setDeleting(o)} className="rounded-lg p-2 text-ink-500 hover:bg-red-50 hover:text-red-600" title="Удалить"><FiTrash2 size={15} /></button>
                         </div>
@@ -188,6 +191,15 @@ export default function OrderList() {
 
       {formOpen && (
         <OrderForm open order={editing} onClose={() => setFormOpen(false)} onSaved={handleSaved} />
+      )}
+
+      {viewing && (
+        <OrderView
+          open
+          order={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={(o) => { setViewing(null); openEdit(o) }}
+        />
       )}
 
       <ConfirmDialog
