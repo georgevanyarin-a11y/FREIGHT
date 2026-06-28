@@ -8,6 +8,8 @@ export default function OrderView({ open, order, onClose, onEdit }) {
   const sv = stageView(order.stage)
   const points = Array.isArray(order.points) ? order.points : []
   const checklist = Array.isArray(order.checklist) ? order.checklist : []
+  const n = (v) => (v == null || v === '' ? 0 : Number(v) || 0)
+  const expenses = n(order.expense_fuel) + n(order.expense_road) + n(order.expense_per_diem) + n(order.expense_other)
 
   return (
     <Modal
@@ -65,6 +67,14 @@ export default function OrderView({ open, order, onClose, onEdit }) {
           <Row label="Водитель" value={order.driver_name} />
           <Row label="Телефон водителя" value={order.driver_phone} />
           <Row label="Транспорт" value={order.vehicle_info} />
+        </Card>
+
+        <Card title="Финансы и оплата">
+          <Row label="Ставка" value={order.rate != null ? formatMoney(order.rate) : ''} />
+          <Row label="Расходы" value={expenses ? formatMoney(expenses) : ''} />
+          <Row label="Прибыль" value={order.rate != null ? formatMoney(n(order.rate) - expenses) : ''} />
+          <Row label="Срок оплаты" value={formatDate(order.payment_due_date)} />
+          <Row label="Оплата" value={order.paid ? ('Оплачено' + (order.paid_at ? ' · ' + formatDate(order.paid_at) : '')) : 'Не оплачено'} />
         </Card>
 
         {checklist.length > 0 && (

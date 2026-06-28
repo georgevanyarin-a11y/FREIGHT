@@ -31,6 +31,13 @@ const emptyForm = () => ({
   driver_name: '',
   driver_phone: '',
   vehicle_info: '',
+  expense_fuel: '',
+  expense_road: '',
+  expense_per_diem: '',
+  expense_other: '',
+  payment_due_date: '',
+  paid: false,
+  paid_at: '',
   note: '',
   points: [emptyPoint('loading'), emptyPoint('unloading')],
   checklist: defaultChecklist()
@@ -56,6 +63,13 @@ function fromOrder(order) {
     driver_name: order.driver_name || '',
     driver_phone: order.driver_phone || '',
     vehicle_info: order.vehicle_info || '',
+    expense_fuel: order.expense_fuel == null ? '' : String(order.expense_fuel),
+    expense_road: order.expense_road == null ? '' : String(order.expense_road),
+    expense_per_diem: order.expense_per_diem == null ? '' : String(order.expense_per_diem),
+    expense_other: order.expense_other == null ? '' : String(order.expense_other),
+    payment_due_date: order.payment_due_date || '',
+    paid: !!order.paid,
+    paid_at: order.paid_at || '',
     note: order.note || '',
     points,
     checklist
@@ -134,6 +148,13 @@ export default function OrderForm({ open, order, initialData, onClose, onSaved }
       driver_name: form.driver_name,
       driver_phone: form.driver_phone,
       vehicle_info: form.vehicle_info,
+      expense_fuel: num(form.expense_fuel),
+      expense_road: num(form.expense_road),
+      expense_per_diem: num(form.expense_per_diem),
+      expense_other: num(form.expense_other),
+      payment_due_date: form.payment_due_date || null,
+      paid: !!form.paid,
+      paid_at: form.paid ? (form.paid_at || null) : null,
       note: form.note,
       points: form.points,
       checklist: form.checklist,
@@ -150,6 +171,10 @@ export default function OrderForm({ open, order, initialData, onClose, onSaved }
   }
 
   const cpOptions = [{ value: '', label: '— не выбран —' }, ...counterparties.map((c) => ({ value: c.id, label: c.name }))]
+
+  const toNum = (v) => (v === '' || v == null ? 0 : Number(v) || 0)
+  const expensesSum = toNum(form.expense_fuel) + toNum(form.expense_road) + toNum(form.expense_per_diem) + toNum(form.expense_other)
+  const profit = toNum(form.rate) - expensesSum
 
   return (
     <Modal
@@ -257,10 +282,43 @@ export default function OrderForm({ open, order, initialData, onClose, onSaved }
           </ul>
         </fieldset>
 
+        {/* Финансы и оплата */}
+        <fieldset className="rounded-xl border border-ink-200 p-4">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-brand-700">Финансы и оплата</legend>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Input label="ГСМ, ₽" type="number" min="0" step="0.01" value={form.expense_fuel} onChange={set('expense_fuel')} />
+              <Input label="Платные дороги, ₽" type="number" min="0" step="0.01" value={form.expense_road} onChange={set('expense_road')} />
+              <Input label="Суточные, ₽" type="number" min="0" step="0.01" value={form.expense_per_diem} onChange={set('expense_per_diem')} />
+              <Input label="Прочее, ₽" type="number" min="0" step="0.01" value={form.expense_other} onChange={set('expense_other')} />
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-ink-50 px-3 py-2 text-sm">
+              <span className="text-ink-500">Прибыль (ставка − расходы)</span>
+              <span className={`font-semibold ${profit < 0 ? 'text-red-600' : 'text-ink-900'}`}>{formatMoney(profit)}</span>
+            </div>
+            <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2">
+              <Input label="Срок оплаты" type="date" value={form.payment_due_date || ''} onChange={set('payment_due_date')} />
+              <label className="flex items-center gap-2 pb-2.5 text-sm text-ink-700">
+                <input type="checkbox" checked={form.paid} onChange={set('paid')} className="h-4 w-4 rounded border-ink-300 text-brand-700" />
+                Оплачено
+              </label>
+            </div>
+            {form.paid && (
+              <Input label="Дата оплаты" type="date" value={form.paid_at || ''} onChange={set('paid_at')} />
+            )}
+          </div>
+        </fieldset>
+
         <Textarea label="Примечание" name="note" rows={2} value={form.note} onChange={set('note')} />
 
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       </form>
     </Modal>
   )
+}
+
+function formatMoney(value) {
+  const n = Number(value)
+  if (Number.isNaN(n)) return '0 ₽'
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽'
 }
