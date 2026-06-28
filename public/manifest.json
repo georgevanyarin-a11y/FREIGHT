@@ -1,0 +1,20 @@
+{
+  "name": "Перевозчик CRM",
+  "short_name": "Перевозчик",
+  "description": "CRM-система для ИП-перевозчика: заявки, документы, контрагенты, финансы.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f6f7f9",
+  "theme_color": "#1e293b",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
