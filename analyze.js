@@ -1,20 +1,12 @@
 // Серверная функция Vercel: распознаёт договор через GigaChat (Сбер).
-// Путь запроса в приложении: POST /api/analyze
-//
-// Принимает: { images: [base64Jpeg, ...] } — страницы PDF, превращённые в картинки.
-// Отдаёт: JSON с извлечёнными полями договора.
-//
-// Переменные окружения (задаются в Vercel → Settings → Environment Variables):
-//   GIGACHAT_AUTH_KEY  — ключ авторизации (Authorization key) из личного кабинета Сбера
-//   GIGACHAT_SCOPE     — необязательно, по умолчанию GIGACHAT_API_PERS (для физлиц)
-//   GIGACHAT_MODEL     — необязательно, по умолчанию GigaChat-2
+// Путь запроса: POST /api/analyze
+// Переменные окружения в Vercel: GIGACHAT_AUTH_KEY (обязательно),
+//   GIGACHAT_SCOPE (по умолчанию GIGACHAT_API_PERS), GIGACHAT_MODEL (по умолчанию GigaChat-2)
 
 import crypto from 'node:crypto'
 
-// GigaChat использует российский корневой сертификат, которого нет в доверенном
-// списке Node по умолчанию. Для простоты отключаем проверку TLS только в этой
-// функции (она ходит только к серверам Сбера). Для усиления можно установить
-// корневой сертификат Минцифры и убрать эту строку.
+// GigaChat использует российский корневой сертификат, которого нет в Node по умолчанию.
+// Отключаем проверку TLS только в этой функции (она ходит лишь к серверам Сбера).
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 const OAUTH_URL = 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth'
@@ -57,13 +49,11 @@ export default async function handler(req, res) {
   try {
     const token = await getToken(authKey, scope)
 
-    // Загружаем каждую страницу-картинку в хранилище GigaChat
     const fileIds = []
     for (let i = 0; i < images.length; i++) {
       fileIds.push(await uploadImage(token, images[i], i + 1))
     }
 
-    // В одном сообщении — одна картинка; финальное сообщение содержит задание
     const messages = fileIds.map((id, i) => ({
       role: 'user',
       content: `Изображение страницы ${i + 1} договора.`,

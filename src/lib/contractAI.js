@@ -1,17 +1,15 @@
 // Распознавание договора через GigaChat.
 // В браузере страницы PDF превращаются в изображения (чтобы читались и сканы),
-// затем отправляются на серверную функцию /api/analyze, которая ходит в GigaChat.
-//
-// Серверная функция работает только на развёрнутом сайте Vercel (или при `vercel dev`).
-// При обычном локальном `npm run dev` запрос вернёт 404 — это ожидаемо.
+// затем отправляются на серверную функцию /api/analyze.
+// Функция работает только на сайте Vercel (или при `vercel dev`), не при `npm run dev`.
 
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
-const MAX_PAGES = 4 // ограничение, чтобы не превышать лимиты по размеру запроса
-const SCALE = 1.6 // масштаб рендера (баланс между чёткостью OCR и размером)
+const MAX_PAGES = 4
+const SCALE = 1.6
 const JPEG_QUALITY = 0.7
 
 export async function analyzeContractPdf(file) {
@@ -37,7 +35,7 @@ export async function analyzeContractPdf(file) {
       const j = await res.json()
       if (j?.error) message = j.error
     } catch {
-      /* тело не JSON — оставляем стандартное сообщение */
+      /* тело не JSON */
     }
     throw new Error(message)
   }
@@ -46,7 +44,6 @@ export async function analyzeContractPdf(file) {
   return normalize(data)
 }
 
-// Рендерим первые страницы PDF в JPEG-картинки (base64 без префикса data:)
 async function pdfToImages(file) {
   const buffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
@@ -68,7 +65,6 @@ async function pdfToImages(file) {
   return images
 }
 
-// Приводим ответ к предсказуемой форме
 function normalize(obj) {
   const str = (v) => (v == null ? '' : String(v).trim())
   return {
