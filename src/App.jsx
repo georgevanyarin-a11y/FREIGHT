@@ -8,7 +8,6 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import OrderList from './pages/Orders/OrderList'
 import DocumentList from './pages/Documents/DocumentList'
-import Counterparties from './pages/Counterparties'
 import Finance from './pages/Finance'
 import Reminders from './pages/Reminders'
 import Settings from './pages/Settings'
@@ -34,14 +33,13 @@ export default function App() {
         }
       >
         <Route path="/orders" element={<OrderList />} />
-        <Route path="/Documents" element={<DocumentList />} />
+        <Route path="/documents" element={<DocumentList />} />
         <Route path="/contract-import" element={<ContractImport />} />
-        <Route path="/counterparties" element={<Counterparties />} />
+        <Route path="/counterparties" element={<CounterpartyList />} />
+        <Route path="/profile" element={<CarrierProfile />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/reminders" element={<Reminders />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/profile" element={<CarrierProfile />} />
-        <Route path="/counterparties" element={<CounterpartyList />} />
       </Route>
 
       {/* Корень и всё остальное → заявки */}
