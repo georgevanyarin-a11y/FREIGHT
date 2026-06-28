@@ -1,7 +1,9 @@
 // Серверная функция Vercel: распознаёт заявку/договор через GigaChat (Сбер).
 // Путь: POST /api/analyze, тело { pdf: base64, filename }
-// Сервер сам достаёт текст из PDF (pdf-parse). Есть текст → точный текстовый путь
-// (бесплатная модель). Текста нет (скан) → отправляет PDF файлом в GigaChat (Pro).
+//
+// Защита от галлюцинаций:
+//  - если в PDF нет текстового слоя (скан) — возвращаем ошибку, НЕ выдумываем;
+//  - проверяем, что ИИ вернул осмысленный результат (есть адреса), иначе ошибка.
 
 import crypto from 'node:crypto'
 import pdfParse from 'pdf-parse'
@@ -34,16 +36,16 @@ const SCHEMA = `Верни СТРОГО один JSON-объект без markdo
 }
 
 ПРАВИЛА для "points":
-- Перечисли КАЖДОЕ место отдельным объектом, по порядку. Несколько мест погрузки (Место 1, Место 2, ...) — несколько объектов.
-- kind="loading" — ОТКУДА забирают груз (Погрузка, Загрузка, Грузоотправитель).
-- kind="unloading" — КУДА везут и сдают груз (Выгрузка, Разгрузка, Грузополучатель).
+- Перечисли КАЖДОЕ место отдельным объектом, по порядку. Несколько мест погрузки — несколько объектов.
+- kind="loading" — ОТКУДА забирают груз. kind="unloading" — КУДА везут и сдают груз.
 - Один объект = один адрес. НЕ объединяй разные адреса через дефис или запятую.
 - Контакты, дату и время бери из того же блока, что и адрес. Не путай погрузку и выгрузку.
 
-Бери данные ТОЛЬКО из документа. Ничего не выдумывай: нет поля — пустая строка "" (для чисел null). Не угадывай адреса.`
+ОЧЕНЬ ВАЖНО: бери данные ТОЛЬКО из текста документа. Категорически ничего не выдумывай и не угадывай.
+Если поля нет в тексте — оставь пустую строку "" (для чисел null).
+Если в тексте вообще нет данных заявки на грузоперевозку (адресов, маршрута) — верни {"error": "no_data"} и больше ничего.`
 
 const TEXT_INTRO = 'Ты ассистент логиста. Ниже ТЕКСТ заявки/договора на грузоперевозку. Извлеки данные строго по тексту.'
-const FILE_INTRO = 'Ты ассистент логиста. В приложенном файле — заявка/договор на грузоперевозку. Извлеки данные.'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Метод не поддерживается' })
@@ -55,10 +57,7 @@ export default async function handler(req, res) {
   }
 
   const pdfB64 = req.body?.pdf
-  const filename = req.body?.filename || 'document.pdf'
-  if (!pdfB64) {
-    return res.status(400).json({ error: 'Файл не передан.' })
-  }
+  if (!pdfB64) return res.status(400).json({ error: 'Файл не передан.' })
 
   let buffer
   try {
@@ -67,7 +66,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Не удалось декодировать файл.' })
   }
 
-  // 1. Пытаемся достать текст из PDF на сервере
+  // 1. Достаём текст из PDF
   let text = ''
   try {
     const parsed = await pdfParse(buffer)
@@ -75,28 +74,31 @@ export default async function handler(req, res) {
   } catch {
     text = ''
   }
-  const hasText = text.replace(/\s/g, '').length > TEXT_MIN_CHARS
 
+  // 2. Нет текстового слоя → это скан. НЕ выдумываем — отдаём понятную ошибку.
+  if (text.replace(/\s/g, '').length <= TEXT_MIN_CHARS) {
+    return res.status(422).json({
+      error:
+        'Не удалось прочитать текст из файла — похоже, это скан или фотография без текстового слоя. ' +
+        'Загрузите PDF, в котором текст выделяется мышью (например, выгрузку из 1С/АТИ), ' +
+        'либо заполните заявку вручную.',
+      debug: {
+        inputMode: 'text',
+        textChars: text.length,
+        textPreview: '(текстовый слой не найден или его слишком мало)',
+        prompt: '(запрос к ИИ не отправлялся — нет текста)',
+        raw: '',
+        parseError: null
+      }
+    })
+  }
+
+  // 3. Текст есть → отправляем в GigaChat
   try {
     const token = await getToken(authKey, scope)
-
-    let model
-    let messages
-    let mode
-
-    if (hasText) {
-      mode = 'text'
-      model = process.env.GIGACHAT_TEXT_MODEL || 'GigaChat-2'
-      messages = [{ role: 'user', content: `${TEXT_INTRO}\n\n${SCHEMA}\n\n===== ТЕКСТ ДОКУМЕНТА =====\n${text}` }]
-    } else {
-      // Скан без текстового слоя — отправляем PDF файлом
-      mode = 'file'
-      model = process.env.GIGACHAT_MODEL || 'GigaChat-2-Pro'
-      const fileId = await uploadPdf(token, buffer, filename)
-      messages = [
-        { role: 'user', content: `${FILE_INTRO}\n\n${SCHEMA}`, attachments: [fileId] }
-      ]
-    }
+    const model = process.env.GIGACHAT_TEXT_MODEL || 'GigaChat-2'
+    const prompt = `${TEXT_INTRO}\n\n${SCHEMA}`
+    const messages = [{ role: 'user', content: `${prompt}\n\n===== ТЕКСТ ДОКУМЕНТА =====\n${text}` }]
 
     const completion = await fetch(`${API_BASE}/chat/completions`, {
       method: 'POST',
@@ -120,21 +122,46 @@ export default async function handler(req, res) {
       parseError = e.message
     }
 
-    return res.status(200).json({
-      result: parsed,
-      debug: {
-        model,
-        inputMode: mode === 'text' ? 'text' : 'vision',
-        textChars: text.length,
-        textPreview: hasText ? text.slice(0, 2000) : '(текстовый слой не найден — скан)',
-        prompt: hasText ? `${TEXT_INTRO}\n\n${SCHEMA}` : `${FILE_INTRO}\n\n${SCHEMA}`,
-        raw: content,
-        parseError
-      }
-    })
+    const debug = {
+      model,
+      inputMode: 'text',
+      textChars: text.length,
+      textPreview: text.slice(0, 2000),
+      prompt,
+      raw: content,
+      parseError
+    }
+
+    // 4. Модель сама сообщила, что данных нет
+    if (parsed && parsed.error === 'no_data') {
+      return res.status(422).json({
+        error: 'В документе не найдено данных заявки на грузоперевозку. Проверьте файл или заполните вручную.',
+        debug
+      })
+    }
+
+    // 5. Проверка осмысленности: должен быть хотя бы один адрес в маршруте
+    if (!isMeaningful(parsed)) {
+      return res.status(422).json({
+        error:
+          'Не удалось уверенно распознать заявку (не найдены адреса маршрута). ' +
+          'Чтобы не подставить неверные данные, заявка не создана. Проверьте файл или заполните вручную.',
+        debug
+      })
+    }
+
+    return res.status(200).json({ result: parsed, debug })
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Внутренняя ошибка распознавания.' })
   }
+}
+
+// Результат считаем осмысленным, если есть хотя бы одна точка с непустым адресом
+function isMeaningful(parsed) {
+  if (!parsed || typeof parsed !== 'object') return false
+  const points = Array.isArray(parsed.points) ? parsed.points : []
+  const hasAddress = points.some((p) => p && typeof p.address === 'string' && p.address.trim().length > 3)
+  return hasAddress
 }
 
 async function getToken(authKey, scope) {
@@ -153,22 +180,6 @@ async function getToken(authKey, scope) {
     throw new Error(`Авторизация GigaChat не удалась (${res.status}). ${t.slice(0, 200)}`)
   }
   return (await res.json()).access_token
-}
-
-async function uploadPdf(token, buffer, filename) {
-  const form = new FormData()
-  form.append('purpose', 'general')
-  form.append('file', new Blob([buffer], { type: 'application/pdf' }), filename)
-  const res = await fetch(`${API_BASE}/files`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: form
-  })
-  if (!res.ok) {
-    const t = await res.text()
-    throw new Error(`Загрузка файла не удалась (${res.status}). ${t.slice(0, 200)}`)
-  }
-  return (await res.json()).id
 }
 
 function parseJson(text) {

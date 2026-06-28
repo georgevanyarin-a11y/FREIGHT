@@ -1,13 +1,11 @@
 // Распознавание заявки/договора через GigaChat.
-// Браузер НЕ обрабатывает PDF — просто кодирует файл и отправляет на сервер.
-// Извлечение текста и распознавание делает серверная функция /api/analyze.
-// Это убирает зависимость от мобильных браузеров (Safari на iPhone и т.п.).
+// Браузер только кодирует PDF и отправляет на сервер — разбор делает /api/analyze.
 
 const MAX_FILE_SIZE = 3 * 1024 * 1024 // 3 МБ (ограничение тела запроса Vercel)
 
 export async function analyzeContractPdf(file) {
   if (file.size > MAX_FILE_SIZE) {
-    throw new Error('Файл слишком большой (максимум 15 МБ).')
+    throw new Error('Файл слишком большой (максимум 3 МБ).')
   }
 
   const base64 = await fileToBase64(file)
@@ -23,26 +21,31 @@ export async function analyzeContractPdf(file) {
     throw new Error('Не удалось связаться с сервисом распознавания: ' + msg(e))
   }
 
+  // Пытаемся прочитать тело как JSON (там может быть и error, и debug)
+  let json = null
+  try {
+    json = await res.json()
+  } catch {
+    json = null
+  }
+
   if (!res.ok) {
     let message = `Сервис распознавания недоступен (${res.status}).`
     if (res.status === 404) {
       message =
         'Сервис распознавания не найден. Распознавание работает только на опубликованном ' +
         'сайте Vercel, а не при локальном запуске.'
+    } else if (json && json.error) {
+      message = json.error
     }
-    try {
-      const j = await res.json()
-      if (j?.error) message = j.error
-    } catch {
-      /* not json */
-    }
-    throw new Error(message)
+    const err = new Error(message)
+    if (json && json.debug) err.debug = json.debug // покажем диагностику даже при ошибке
+    throw err
   }
 
-  const json = await res.json()
-  const debug = json.debug || null
+  const debug = (json && json.debug) || null
 
-  if (!json.result) {
+  if (!json || !json.result) {
     const err = new Error(
       (debug && debug.parseError) ||
         'ИИ не вернул структурированные данные. Откройте «Технические данные» и пришлите их.'
