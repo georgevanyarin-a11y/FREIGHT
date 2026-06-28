@@ -7,7 +7,8 @@ import {
   FiBell,
   FiSettings,
   FiTruck,
-  FiCpu
+  FiCpu,
+  FiUser
 } from 'react-icons/fi'
 
 // Пункты навигации. Чтобы добавить новый модуль — добавьте строку сюда
@@ -20,6 +21,7 @@ export const NAV_ITEMS = [
   { to: '/finance', label: 'Финансы', icon: FiDollarSign },
   { to: '/reminders', label: 'Напоминания', icon: FiBell },
   { to: '/settings', label: 'Настройки', icon: FiSettings }
+  { to: '/profile', label: 'Профиль перевозчика', icon: FiUser },
 ]
 
 export default function Sidebar({ onNavigate }) {

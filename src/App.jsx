@@ -13,6 +13,8 @@ import Finance from './pages/Finance'
 import Reminders from './pages/Reminders'
 import Settings from './pages/Settings'
 import ContractImport from './pages/ContractImport/ContractImport'
+import CarrierProfile from './pages/Profile/CarrierProfile'
+import CounterpartyList from './pages/Counterparties/CounterpartyList'
 
 export default function App() {
   const { session } = useAuth()
@@ -38,6 +40,8 @@ export default function App() {
         <Route path="/finance" element={<Finance />} />
         <Route path="/reminders" element={<Reminders />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/profile" element={<CarrierProfile />} />
+        <Route path="/counterparties" element={<CounterpartyList />} />
       </Route>
 
       {/* Корень и всё остальное → заявки */}
