@@ -1,7 +1,7 @@
 // Серверная функция Vercel: распознаёт заявку/договор через GigaChat (Сбер).
 // Путь: POST /api/analyze
-// Переменные окружения: GIGACHAT_AUTH_KEY (обязательно),
-//   GIGACHAT_SCOPE (по умолчанию GIGACHAT_API_PERS), GIGACHAT_MODEL (по умолчанию GigaChat-2)
+// Возвращает { result, debug } — debug содержит промпт и сырой ответ GigaChat
+// для диагностики.
 
 import crypto from 'node:crypto'
 
@@ -91,7 +91,26 @@ export default async function handler(req, res) {
 
     const data = await completion.json()
     const content = data?.choices?.[0]?.message?.content || ''
-    return res.status(200).json(parseJson(content))
+
+    let parsed = null
+    let parseError = null
+    try {
+      parsed = parseJson(content)
+    } catch (e) {
+      parseError = e.message
+    }
+
+    // result — распознанные данные, debug — для диагностики (промпт + сырой ответ)
+    return res.status(200).json({
+      result: parsed,
+      debug: {
+        model,
+        pages: images.length,
+        prompt: PROMPT,
+        raw: content,
+        parseError
+      }
+    })
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Внутренняя ошибка распознавания.' })
   }
@@ -139,6 +158,6 @@ function parseJson(text) {
   } catch {
     const match = clean.match(/\{[\s\S]*\}/)
     if (match) return JSON.parse(match[0])
-    throw new Error('Не удалось разобрать ответ ИИ. Попробуйте другой файл.')
+    throw new Error('Не удалось разобрать ответ ИИ как JSON.')
   }
 }

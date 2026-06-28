@@ -1,6 +1,6 @@
 // Распознавание заявки/договора через GigaChat.
-// PDF → картинки (в браузере) → /api/analyze → структура с маршрутом.
-// Серверная функция работает только на сайте Vercel (или `vercel dev`), не при `npm run dev`.
+// PDF → картинки (в браузере) → /api/analyze → { result, debug }.
+// Возвращает { fields, debug }: fields — данные для формы, debug — для диагностики.
 
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -37,7 +37,22 @@ export async function analyzeContractPdf(file) {
     throw new Error(message)
   }
 
-  return normalize(await res.json())
+  const json = await res.json()
+  const debug = json.debug || null
+
+  if (!json.result) {
+    const err = new Error(
+      (debug && debug.parseError) ||
+        'ИИ не вернул структурированные данные. Откройте «Технические данные» и пришлите их.'
+    )
+    err.debug = debug
+    throw err
+  }
+
+  return {
+    fields: normalize(json.result),
+    debug: { ...debug, parsed: json.result }
+  }
 }
 
 async function pdfToImages(file) {
@@ -57,21 +72,19 @@ async function pdfToImages(file) {
   return images
 }
 
-// Приводим ответ ИИ к форме, которую использует OrderForm
 function normalize(obj) {
   const str = (v) => (v == null ? '' : String(v).trim())
   const numStr = (v) => (v === null || v === undefined || v === '' ? '' : String(v))
 
-  const points = Array.isArray(obj.points)
-    ? obj.points.map((p) => ({
-        kind: p.kind === 'unloading' ? 'unloading' : 'loading',
-        address: str(p.address),
-        date: str(p.date),
-        time: str(p.time),
-        contact_name: str(p.contact_name),
-        contact_phone: str(p.contact_phone)
-      }))
-    : []
+  const rawPoints = Array.isArray(obj.points) ? obj.points : []
+  const points = rawPoints.map((p) => ({
+    kind: p.kind === 'unloading' ? 'unloading' : 'loading',
+    address: str(p.address),
+    date: str(p.date),
+    time: str(p.time),
+    contact_name: str(p.contact_name),
+    contact_phone: str(p.contact_phone)
+  }))
 
   return {
     customer_number: str(obj.customer_number),

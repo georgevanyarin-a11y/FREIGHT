@@ -178,7 +178,9 @@ export default function OrderList() {
         </div>
       </div>
 
-      <OrderForm open={formOpen} order={editing} onClose={() => setFormOpen(false)} onSaved={handleSaved} />
+      {formOpen && (
+        <OrderForm open order={editing} onClose={() => setFormOpen(false)} onSaved={handleSaved} />
+      )}
 
       <ConfirmDialog
         open={Boolean(deleting)}

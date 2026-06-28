@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FiUploadCloud, FiCpu, FiCheckCircle, FiArrowRight } from 'react-icons/fi'
+import { FiUploadCloud, FiCpu, FiCheckCircle, FiArrowRight, FiCopy, FiTerminal } from 'react-icons/fi'
 import { analyzeContractPdf } from '../../lib/contractAI'
 import OrderForm from '../Orders/OrderForm'
 import Button from '../../components/ui/Button'
@@ -14,6 +14,8 @@ export default function ContractImport() {
   const [initialData, setInitialData] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [created, setCreated] = useState(null)
+  const [debug, setDebug] = useState(null)
+  const [copied, setCopied] = useState(false)
 
   const pickFile = (e) => {
     const f = e.target.files?.[0] || null
@@ -28,12 +30,15 @@ export default function ContractImport() {
     if (!file) return setError('Выберите PDF договора.')
     setAnalyzing(true)
     setError('')
+    setDebug(null)
     try {
-      const data = await analyzeContractPdf(file)
-      setInitialData(data)
+      const { fields, debug } = await analyzeContractPdf(file)
+      setDebug(debug)
+      setInitialData(fields)
       setFormOpen(true)
     } catch (err) {
       setError(err.message || 'Не удалось распознать договор.')
+      if (err.debug) setDebug(err.debug)
     } finally {
       setAnalyzing(false)
     }
@@ -43,6 +48,19 @@ export default function ContractImport() {
     setCreated(null)
     setFile(null)
     setInitialData(null)
+    setDebug(null)
+  }
+
+  const logText = debug ? buildLog(debug) : ''
+
+  const copyLog = async () => {
+    try {
+      await navigator.clipboard.writeText(logText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* пользователь может выделить текст вручную */
+    }
   }
 
   return (
@@ -103,13 +121,73 @@ export default function ContractImport() {
         </div>
       )}
 
-      {/* Форма для проверки распознанных данных перед созданием заявки */}
-      <OrderForm
-        open={formOpen}
-        initialData={initialData}
-        onClose={() => setFormOpen(false)}
-        onSaved={(o) => { setFormOpen(false); setCreated(o) }}
-      />
+      {/* Панель диагностики: появляется после распознавания */}
+      {debug && (
+        <div className="mt-6 max-w-3xl rounded-2xl border border-ink-200 bg-white shadow-card">
+          <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-ink-700">
+              <FiTerminal size={15} className="text-ink-400" />
+              Технические данные (для диагностики)
+            </div>
+            <Button size="sm" variant="secondary" onClick={copyLog}>
+              <FiCopy size={14} />
+              {copied ? 'Скопировано' : 'Скопировать'}
+            </Button>
+          </div>
+          <div className="px-4 py-3">
+            <p className="mb-2 text-xs text-ink-500">
+              Если распозналось неверно — нажмите «Скопировать» и пришлите этот текст.
+            </p>
+            <textarea
+              readOnly
+              value={logText}
+              onClick={(e) => e.target.select()}
+              className="h-64 w-full resize-y rounded-lg border border-ink-200 bg-ink-50 p-3 font-mono text-xs text-ink-700"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Форма открывается только когда готовы данные — поэтому подхватывает их корректно */}
+      {formOpen && (
+        <OrderForm
+          open
+          initialData={initialData}
+          onClose={() => setFormOpen(false)}
+          onSaved={(o) => { setFormOpen(false); setCreated(o) }}
+        />
+      )}
     </div>
   )
+}
+
+// Формируем читаемый лог для отправки
+function buildLog(debug) {
+  const parts = []
+  parts.push('=== МОДЕЛЬ ===')
+  parts.push(String(debug.model || '—'))
+  parts.push('')
+  parts.push('=== СТРАНИЦ ОТПРАВЛЕНО ===')
+  parts.push(String(debug.pages ?? '—'))
+  parts.push('')
+  if (debug.parseError) {
+    parts.push('=== ОШИБКА РАЗБОРА ОТВЕТА ===')
+    parts.push(String(debug.parseError))
+    parts.push('')
+  }
+  parts.push('=== СЫРОЙ ОТВЕТ GIGACHAT ===')
+  parts.push(String(debug.raw || '(пусто)'))
+  parts.push('')
+  if (debug.parsed) {
+    parts.push('=== РАЗОБРАНО (JSON) ===')
+    try {
+      parts.push(JSON.stringify(debug.parsed, null, 2))
+    } catch {
+      parts.push('(не удалось показать)')
+    }
+    parts.push('')
+  }
+  parts.push('=== ПРОМПТ ===')
+  parts.push(String(debug.prompt || '—'))
+  return parts.join('\n')
 }
