@@ -1,62 +1,23 @@
 // Распознавание заявки/договора через GigaChat.
-// Цифровой PDF (есть текстовый слой) → отправляем текст (точно, бесплатно).
-// Скан (текста нет) → рендерим страницы в картинки → отправляем их (зрение, Pro).
+// Браузер НЕ обрабатывает PDF — просто кодирует файл и отправляет на сервер.
+// Извлечение текста и распознавание делает серверная функция /api/analyze.
+// Это убирает зависимость от мобильных браузеров (Safari на iPhone и т.п.).
 
-import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
-
-const TEXT_MIN_CHARS = 200
-const TEXT_MAX_PAGES = 8
-const IMG_MAX_PAGES = 3
-const IMG_SCALE = 2.6
-const IMG_JPEG_QUALITY = 0.9
+const MAX_FILE_SIZE = 3 * 1024 * 1024 // 3 МБ (ограничение тела запроса Vercel)
 
 export async function analyzeContractPdf(file) {
-  // 1. Открываем PDF
-  let pdf
-  try {
-    const buffer = await file.arrayBuffer()
-    pdf = await pdfjsLib.getDocument({ data: buffer }).promise
-  } catch (e) {
-    throw new Error('Не удалось открыть PDF: ' + msg(e))
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error('Файл слишком большой (максимум 15 МБ).')
   }
 
-  // 2. Пытаемся достать текстовый слой
-  let text = ''
-  try {
-    text = await pdfToText(pdf)
-  } catch {
-    text = '' // нет текста — пойдём через картинки
-  }
-  const hasText = text.replace(/\s/g, '').length > TEXT_MIN_CHARS
+  const base64 = await fileToBase64(file)
 
-  // 3. Готовим тело запроса
-  let body
-  let clientDebug
-  if (hasText) {
-    body = { text }
-    clientDebug = { inputMode: 'text', textChars: text.length, textPreview: text.slice(0, 2000) }
-  } else {
-    let images
-    try {
-      images = await pdfToImages(pdf)
-    } catch (e) {
-      throw new Error('Не удалось подготовить изображения страниц: ' + msg(e))
-    }
-    if (!images.length) throw new Error('Не удалось прочитать страницы PDF.')
-    body = { images }
-    clientDebug = { inputMode: 'vision', pages: images.length }
-  }
-
-  // 4. Отправляем на сервер
   let res
   try {
     res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ pdf: base64, filename: file.name })
     })
   } catch (e) {
     throw new Error('Не удалось связаться с сервисом распознавания: ' + msg(e))
@@ -79,11 +40,12 @@ export async function analyzeContractPdf(file) {
   }
 
   const json = await res.json()
-  const debug = { ...(json.debug || {}), ...clientDebug }
+  const debug = json.debug || null
 
   if (!json.result) {
     const err = new Error(
-      debug.parseError || 'ИИ не вернул структурированные данные. Откройте «Технические данные» и пришлите их.'
+      (debug && debug.parseError) ||
+        'ИИ не вернул структурированные данные. Откройте «Технические данные» и пришлите их.'
     )
     err.debug = debug
     throw err
@@ -92,33 +54,13 @@ export async function analyzeContractPdf(file) {
   return { fields: normalize(json.result), debug: { ...debug, parsed: json.result } }
 }
 
-async function pdfToText(pdf) {
-  const pages = Math.min(pdf.numPages, TEXT_MAX_PAGES)
-  let out = ''
-  for (let i = 1; i <= pages; i++) {
-    const page = await pdf.getPage(i)
-    const content = await page.getTextContent()
-    const line = content.items.map((it) => (it && it.str != null ? it.str : '')).join(' ')
-    out += line + '\n'
-  }
-  return out.trim()
-}
-
-async function pdfToImages(pdf) {
-  const pages = Math.min(pdf.numPages, IMG_MAX_PAGES)
-  const images = []
-  for (let i = 1; i <= pages; i++) {
-    const page = await pdf.getPage(i)
-    const viewport = page.getViewport({ scale: IMG_SCALE })
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.floor(viewport.width)
-    canvas.height = Math.floor(viewport.height)
-    const ctx = canvas.getContext('2d')
-    // canvas — для pdfjs-dist v5, canvasContext — для v4. Передаём оба для совместимости.
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise
-    images.push(canvas.toDataURL('image/jpeg', IMG_JPEG_QUALITY).split(',')[1])
-  }
-  return images
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',')[1])
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл.'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function msg(e) {

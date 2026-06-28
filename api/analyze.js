@@ -1,18 +1,18 @@
 // Серверная функция Vercel: распознаёт заявку/договор через GigaChat (Сбер).
-// Путь: POST /api/analyze
-// Тело запроса:
-//   { text: "..." }    — текст из цифрового PDF (точный путь, бесплатная модель)
-//   { images: [...] }  — картинки страниц (зрение, для сканов; модель Pro)
-// Возвращает { result, debug }.
+// Путь: POST /api/analyze, тело { pdf: base64, filename }
+// Сервер сам достаёт текст из PDF (pdf-parse). Есть текст → точный текстовый путь
+// (бесплатная модель). Текста нет (скан) → отправляет PDF файлом в GigaChat (Pro).
 
 import crypto from 'node:crypto'
+import pdfParse from 'pdf-parse'
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 const OAUTH_URL = 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth'
 const API_BASE = 'https://gigachat.devices.sberbank.ru/api/v1'
 
-// Общая часть запроса: что извлекать и в каком формате
+const TEXT_MIN_CHARS = 200
+
 const SCHEMA = `Верни СТРОГО один JSON-объект без markdown и без пояснений, такой структуры:
 {
   "customer_number": "номер заявки/договора заказчика",
@@ -27,14 +27,9 @@ const SCHEMA = `Верни СТРОГО один JSON-объект без markdo
   "vehicle_info": "марка и гос. номер транспортного средства",
   "note": "прочие важные условия (например, способ погрузки/разгрузки)",
   "points": [
-    {
-      "kind": "loading или unloading",
-      "address": "полный адрес как в документе",
-      "date": "ГГГГ-ММ-ДД",
-      "time": "интервал времени, например 08:00–16:00",
-      "contact_name": "имя контактного лица",
-      "contact_phone": "телефон контактного лица"
-    }
+    { "kind": "loading или unloading", "address": "полный адрес как в документе",
+      "date": "ГГГГ-ММ-ДД", "time": "интервал времени, например 08:00–16:00",
+      "contact_name": "имя контактного лица", "contact_phone": "телефон контактного лица" }
   ]
 }
 
@@ -42,15 +37,13 @@ const SCHEMA = `Верни СТРОГО один JSON-объект без markdo
 - Перечисли КАЖДОЕ место отдельным объектом, по порядку. Несколько мест погрузки (Место 1, Место 2, ...) — несколько объектов.
 - kind="loading" — ОТКУДА забирают груз (Погрузка, Загрузка, Грузоотправитель).
 - kind="unloading" — КУДА везут и сдают груз (Выгрузка, Разгрузка, Грузополучатель).
-- Один объект = один адрес. НЕ объединяй разные адреса через дефис или запятую в один пункт.
+- Один объект = один адрес. НЕ объединяй разные адреса через дефис или запятую.
 - Контакты, дату и время бери из того же блока, что и адрес. Не путай погрузку и выгрузку.
 
-Бери данные ТОЛЬКО из документа. Ничего не выдумывай: если поля нет — пустая строка "" (для чисел null). Не угадывай адреса.`
+Бери данные ТОЛЬКО из документа. Ничего не выдумывай: нет поля — пустая строка "" (для чисел null). Не угадывай адреса.`
 
-const PROMPT_TEXT_INTRO =
-  'Ты ассистент логиста. Ниже приведён ТЕКСТ заявки/договора на грузоперевозку. Извлеки важные для перевозчика данные строго по тексту.'
-const PROMPT_VISION_INTRO =
-  'Ты ассистент логиста. На изображениях — заявка/договор на грузоперевозку. Извлеки важные для перевозчика данные.'
+const TEXT_INTRO = 'Ты ассистент логиста. Ниже ТЕКСТ заявки/договора на грузоперевозку. Извлеки данные строго по тексту.'
+const FILE_INTRO = 'Ты ассистент логиста. В приложенном файле — заявка/договор на грузоперевозку. Извлеки данные.'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Метод не поддерживается' })
@@ -61,42 +54,48 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Не задан GIGACHAT_AUTH_KEY в переменных окружения Vercel.' })
   }
 
-  const text = req.body?.text
-  const images = req.body?.images
-  const hasText = typeof text === 'string' && text.trim().length > 0
-  const hasImages = Array.isArray(images) && images.length > 0
-
-  if (!hasText && !hasImages) {
-    return res.status(400).json({ error: 'Нет данных для распознавания (ни текста, ни изображений).' })
+  const pdfB64 = req.body?.pdf
+  const filename = req.body?.filename || 'document.pdf'
+  if (!pdfB64) {
+    return res.status(400).json({ error: 'Файл не передан.' })
   }
+
+  let buffer
+  try {
+    buffer = Buffer.from(pdfB64, 'base64')
+  } catch {
+    return res.status(400).json({ error: 'Не удалось декодировать файл.' })
+  }
+
+  // 1. Пытаемся достать текст из PDF на сервере
+  let text = ''
+  try {
+    const parsed = await pdfParse(buffer)
+    text = (parsed.text || '').trim()
+  } catch {
+    text = ''
+  }
+  const hasText = text.replace(/\s/g, '').length > TEXT_MIN_CHARS
 
   try {
     const token = await getToken(authKey, scope)
 
     let model
     let messages
-    let promptForDebug
+    let mode
 
     if (hasText) {
-      // ТОЧНЫЙ ПУТЬ: цифровой PDF — отправляем текст, бесплатная модель
+      mode = 'text'
       model = process.env.GIGACHAT_TEXT_MODEL || 'GigaChat-2'
-      const prompt = `${PROMPT_TEXT_INTRO}\n\n${SCHEMA}\n\n===== ТЕКСТ ДОКУМЕНТА =====\n${text}`
-      messages = [{ role: 'user', content: prompt }]
-      promptForDebug = `${PROMPT_TEXT_INTRO}\n\n${SCHEMA}`
+      messages = [{ role: 'user', content: `${TEXT_INTRO}\n\n${SCHEMA}\n\n===== ТЕКСТ ДОКУМЕНТА =====\n${text}` }]
     } else {
-      // ЗАПАСНОЙ ПУТЬ: скан — отправляем картинки, модель со зрением (Pro/Max)
+      // Скан без текстового слоя — отправляем PDF файлом
+      mode = 'file'
       model = process.env.GIGACHAT_MODEL || 'GigaChat-2-Pro'
-      const fileIds = []
-      for (let i = 0; i < images.length; i++) {
-        fileIds.push(await uploadImage(token, images[i], i + 1))
-      }
-      messages = fileIds.map((id, i) => ({
-        role: 'user',
-        content: `Изображение страницы ${i + 1} документа.`,
-        attachments: [id]
-      }))
-      messages.push({ role: 'user', content: `${PROMPT_VISION_INTRO}\n\n${SCHEMA}` })
-      promptForDebug = `${PROMPT_VISION_INTRO}\n\n${SCHEMA}`
+      const fileId = await uploadPdf(token, buffer, filename)
+      messages = [
+        { role: 'user', content: `${FILE_INTRO}\n\n${SCHEMA}`, attachments: [fileId] }
+      ]
     }
 
     const completion = await fetch(`${API_BASE}/chat/completions`, {
@@ -125,8 +124,10 @@ export default async function handler(req, res) {
       result: parsed,
       debug: {
         model,
-        mode: hasText ? 'text' : 'vision',
-        prompt: promptForDebug,
+        inputMode: mode === 'text' ? 'text' : 'vision',
+        textChars: text.length,
+        textPreview: hasText ? text.slice(0, 2000) : '(текстовый слой не найден — скан)',
+        prompt: hasText ? `${TEXT_INTRO}\n\n${SCHEMA}` : `${FILE_INTRO}\n\n${SCHEMA}`,
         raw: content,
         parseError
       }
@@ -154,11 +155,10 @@ async function getToken(authKey, scope) {
   return (await res.json()).access_token
 }
 
-async function uploadImage(token, base64, index) {
-  const bytes = Buffer.from(base64, 'base64')
+async function uploadPdf(token, buffer, filename) {
   const form = new FormData()
   form.append('purpose', 'general')
-  form.append('file', new Blob([bytes], { type: 'image/jpeg' }), `page-${index}.jpg`)
+  form.append('file', new Blob([buffer], { type: 'application/pdf' }), filename)
   const res = await fetch(`${API_BASE}/files`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -166,7 +166,7 @@ async function uploadImage(token, base64, index) {
   })
   if (!res.ok) {
     const t = await res.text()
-    throw new Error(`Загрузка изображения не удалась (${res.status}). ${t.slice(0, 200)}`)
+    throw new Error(`Загрузка файла не удалась (${res.status}). ${t.slice(0, 200)}`)
   }
   return (await res.json()).id
 }
