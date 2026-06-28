@@ -1,24 +1,42 @@
 // Распознавание заявки/договора через GigaChat.
-// PDF → картинки (в браузере) → /api/analyze → { result, debug }.
-// Возвращает { fields, debug }: fields — данные для формы, debug — для диагностики.
+// Если в PDF есть текстовый слой (цифровой документ) — извлекаем ТЕКСT и
+// отправляем его (точно и бесплатно). Если текста нет (скан) — рендерим
+// страницы в картинки и отправляем их (зрение, модель Pro).
 
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
-const MAX_PAGES = 3
-const SCALE = 2.2
-const JPEG_QUALITY = 0.85
+const TEXT_MIN_CHARS = 200 // если осмысленного текста больше — считаем PDF цифровым
+const TEXT_MAX_PAGES = 8
+const IMG_MAX_PAGES = 3
+const IMG_SCALE = 2.6
+const IMG_JPEG_QUALITY = 0.9
 
 export async function analyzeContractPdf(file) {
-  const images = await pdfToImages(file)
-  if (images.length === 0) throw new Error('Не удалось прочитать страницы PDF.')
+  const buffer = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
+
+  const text = await pdfToText(pdf)
+  const hasText = text.replace(/\s/g, '').length > TEXT_MIN_CHARS
+
+  let body
+  let clientDebug
+  if (hasText) {
+    body = { text }
+    clientDebug = { inputMode: 'text', textChars: text.length, textPreview: text.slice(0, 2000) }
+  } else {
+    const images = await pdfToImages(pdf)
+    if (images.length === 0) throw new Error('Не удалось прочитать страницы PDF.')
+    body = { images }
+    clientDebug = { inputMode: 'vision', pages: images.length }
+  }
 
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ images })
+    body: JSON.stringify(body)
   })
 
   if (!res.ok) {
@@ -38,36 +56,44 @@ export async function analyzeContractPdf(file) {
   }
 
   const json = await res.json()
-  const debug = json.debug || null
+  const debug = { ...(json.debug || {}), ...clientDebug }
 
   if (!json.result) {
     const err = new Error(
-      (debug && debug.parseError) ||
-        'ИИ не вернул структурированные данные. Откройте «Технические данные» и пришлите их.'
+      debug.parseError || 'ИИ не вернул структурированные данные. Откройте «Технические данные» и пришлите их.'
     )
     err.debug = debug
     throw err
   }
 
-  return {
-    fields: normalize(json.result),
-    debug: { ...debug, parsed: json.result }
-  }
+  return { fields: normalize(json.result), debug: { ...debug, parsed: json.result } }
 }
 
-async function pdfToImages(file) {
-  const buffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
-  const pages = Math.min(pdf.numPages, MAX_PAGES)
+// Извлечение текстового слоя PDF
+async function pdfToText(pdf) {
+  const pages = Math.min(pdf.numPages, TEXT_MAX_PAGES)
+  let out = ''
+  for (let i = 1; i <= pages; i++) {
+    const page = await pdf.getPage(i)
+    const content = await page.getTextContent()
+    const line = content.items.map((it) => (it.str != null ? it.str : '')).join(' ')
+    out += line + '\n'
+  }
+  return out.trim()
+}
+
+// Рендер страниц в JPEG (для сканов)
+async function pdfToImages(pdf) {
+  const pages = Math.min(pdf.numPages, IMG_MAX_PAGES)
   const images = []
   for (let i = 1; i <= pages; i++) {
     const page = await pdf.getPage(i)
-    const viewport = page.getViewport({ scale: SCALE })
+    const viewport = page.getViewport({ scale: IMG_SCALE })
     const canvas = document.createElement('canvas')
     canvas.width = Math.floor(viewport.width)
     canvas.height = Math.floor(viewport.height)
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
-    images.push(canvas.toDataURL('image/jpeg', JPEG_QUALITY).split(',')[1])
+    images.push(canvas.toDataURL('image/jpeg', IMG_JPEG_QUALITY).split(',')[1])
   }
   return images
 }

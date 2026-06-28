@@ -164,12 +164,22 @@ export default function ContractImport() {
 // Формируем читаемый лог для отправки
 function buildLog(debug) {
   const parts = []
+  parts.push('=== РЕЖИМ ВВОДА ===')
+  parts.push(debug.inputMode === 'vision' ? 'картинки (скан)' : 'текст из PDF')
+  parts.push('')
   parts.push('=== МОДЕЛЬ ===')
   parts.push(String(debug.model || '—'))
   parts.push('')
-  parts.push('=== СТРАНИЦ ОТПРАВЛЕНО ===')
-  parts.push(String(debug.pages ?? '—'))
-  parts.push('')
+  if (debug.inputMode === 'text') {
+    parts.push('=== ИЗВЛЕЧЁННЫЙ ТЕКСТ (превью) ===')
+    parts.push('символов всего: ' + (debug.textChars ?? '—'))
+    parts.push(String(debug.textPreview || '(пусто)'))
+    parts.push('')
+  } else {
+    parts.push('=== СТРАНИЦ ОТПРАВЛЕНО ===')
+    parts.push(String(debug.pages ?? '—'))
+    parts.push('')
+  }
   if (debug.parseError) {
     parts.push('=== ОШИБКА РАЗБОРА ОТВЕТА ===')
     parts.push(String(debug.parseError))
