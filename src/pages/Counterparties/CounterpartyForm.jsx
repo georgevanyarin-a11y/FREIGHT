@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FiSearch } from 'react-icons/fi'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import Modal from '../../components/ui/Modal'
@@ -34,6 +35,40 @@ export default function CounterpartyForm({ open, counterparty, onClose, onSaved 
   const [form, setForm] = useState(() => (counterparty ? fromRow(counterparty) : { ...EMPTY }))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [looking, setLooking] = useState(false)
+  const [lookupError, setLookupError] = useState('')
+
+  const lookupInn = async () => {
+    setLookupError('')
+    const inn = (form.inn || '').replace(/\D/g, '')
+    if (inn.length !== 10 && inn.length !== 12) {
+      setLookupError('Введите ИНН (10 или 12 цифр)')
+      return
+    }
+    setLooking(true)
+    try {
+      const res = await fetch('/api/dadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inn })
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || 'Ошибка запроса')
+      if (!j.found) { setLookupError('Организация по этому ИНН не найдена'); return }
+      setForm((f) => ({
+        ...f,
+        name: j.name || f.name,
+        kpp: j.kpp || f.kpp,
+        ogrn: j.ogrn || f.ogrn,
+        address: j.address || f.address,
+        contact_name: f.contact_name || j.contact_name || ''
+      }))
+    } catch (e) {
+      setLookupError(e.message || 'Не удалось получить данные')
+    } finally {
+      setLooking(false)
+    }
+  }
 
   const set = (name) => (e) => setForm((f) => ({ ...f, [name]: e.target.value }))
 
@@ -68,6 +103,12 @@ export default function CounterpartyForm({ open, counterparty, onClose, onSaved 
           <Input label="ИНН" value={form.inn} onChange={set('inn')} />
           <Input label="КПП" value={form.kpp} onChange={set('kpp')} />
           <Input label="ОГРН" value={form.ogrn} onChange={set('ogrn')} />
+        </div>
+        <div className="flex items-center gap-2">
+          <Button type="button" size="sm" variant="secondary" onClick={lookupInn} disabled={looking}>
+            <FiSearch size={14} />{looking ? 'Поиск…' : 'Заполнить по ИНН'}
+          </Button>
+          {lookupError && <span className="text-xs text-red-600">{lookupError}</span>}
         </div>
         <Input label="Адрес" value={form.address} onChange={set('address')} />
 
