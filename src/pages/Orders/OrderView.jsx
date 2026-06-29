@@ -1,4 +1,7 @@
-import { FiMapPin, FiCheckSquare, FiSquare, FiEdit2 } from 'react-icons/fi'
+import { useState } from 'react'
+import { FiMapPin, FiCheckSquare, FiSquare, FiEdit2, FiFileText, FiDownload } from 'react-icons/fi'
+import { supabase } from '../../lib/supabaseClient'
+import { downloadInvoice, downloadAct } from '../../lib/documents'
 import Modal from '../../components/ui/Modal'
 import Button from '../../components/ui/Button'
 import { stageView } from './orderStages'
@@ -10,6 +13,26 @@ export default function OrderView({ open, order, onClose, onEdit }) {
   const checklist = Array.isArray(order.checklist) ? order.checklist : []
   const n = (v) => (v == null || v === '' ? 0 : Number(v) || 0)
   const expenses = n(order.expense_fuel) + n(order.expense_road) + n(order.expense_per_diem) + n(order.expense_other)
+  const [docBusy, setDocBusy] = useState('')
+  const [docError, setDocError] = useState('')
+
+  const makeDoc = async (kind) => {
+    setDocBusy(kind); setDocError('')
+    try {
+      const { data: profile } = await supabase.from('carrier_profile').select('*').maybeSingle()
+      let cp = order.counterparty || null
+      if (order.counterparty_id) {
+        const { data } = await supabase.from('counterparties').select('*').eq('id', order.counterparty_id).maybeSingle()
+        if (data) cp = data
+      }
+      if (kind === 'invoice') downloadInvoice(order, cp, profile)
+      else downloadAct(order, cp, profile)
+    } catch (e) {
+      setDocError('Не удалось сформировать документ: ' + (e?.message || e))
+    } finally {
+      setDocBusy('')
+    }
+  }
 
   return (
     <Modal
@@ -67,6 +90,18 @@ export default function OrderView({ open, order, onClose, onEdit }) {
           <Row label="Водитель" value={order.driver_name} />
           <Row label="Телефон водителя" value={order.driver_phone} />
           <Row label="Транспорт" value={order.vehicle_info} />
+        </Card>
+
+        <Card title="Документы">
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => makeDoc('invoice')} disabled={docBusy === 'invoice'}>
+              <FiFileText size={14} />{docBusy === 'invoice' ? 'Формирую…' : 'Скачать счёт'}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => makeDoc('act')} disabled={docBusy === 'act'}>
+              <FiDownload size={14} />{docBusy === 'act' ? 'Формирую…' : 'Скачать акт'}
+            </Button>
+          </div>
+          {docError && <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{docError}</div>}
         </Card>
 
         <Card title="Финансы и оплата">
