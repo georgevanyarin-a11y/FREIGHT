@@ -7,8 +7,8 @@ import {
   FiBell,
   FiSettings,
   FiTruck,
-  FiUser
-  
+  FiUser,
+  FiCpu
 } from 'react-icons/fi'
 
 // Пункты навигации. Чтобы добавить новый модуль — добавьте строку сюда
