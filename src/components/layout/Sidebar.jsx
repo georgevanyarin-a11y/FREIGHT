@@ -21,6 +21,7 @@ export const NAV_ITEMS = [
   { to: '/reminders', label: 'Напоминания', icon: FiBell },
   { to: '/settings', label: 'Настройки', icon: FiSettings },
   { to: '/profile', label: 'Профиль перевозчика', icon: FiUser },
+  { to: '/contract-import', label: 'Анализ договора', icon: FiCpu }
   
 ]
 

@@ -14,7 +14,7 @@ import Settings from './pages/Settings'
 import ContractImport from './pages/ContractImport/ContractImport'
 import CarrierProfile from './pages/Profile/CarrierProfile'
 import CounterpartyList from './pages/Counterparties/CounterpartyList'
-
+import ContractImport from './pages/ContractImport/ContractImport'
 
 export default function App() {
   const { session } = useAuth()
